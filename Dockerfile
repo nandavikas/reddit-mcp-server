@@ -28,7 +28,9 @@ RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    mkdir -p /data/reddit-mcp-oauth && \
+    chown -R nodejs:nodejs /data
 
 # Set working directory
 WORKDIR /app
@@ -48,9 +50,12 @@ USER nodejs
 # Default to HTTP mode for Docker, bind to all interfaces so container is reachable
 ENV TRANSPORT_TYPE=httpStream
 ENV HOST=0.0.0.0
+ENV REDDIT_MCP_OAUTH_STORAGE_PATH=/data/reddit-mcp-oauth
 
 # Expose port for HTTP server
 EXPOSE 3000
+VOLUME ["/data"]
 
 # Run the MCP server (defaults to HTTP on port 3000)
 CMD ["node", "dist/index.js"]
+
