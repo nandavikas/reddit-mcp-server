@@ -9,15 +9,16 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    volumes:
+      - reddit-mcp-oauth-data:/data
     # Or use environment variables directly:
     # environment:
     #   - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
     #   - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
-    #   - REDDIT_USERNAME=${REDDIT_USERNAME}
-    #   - REDDIT_PASSWORD=${REDDIT_PASSWORD}
-    #   - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-RedditMCPServer/1.0}
-    #   - OAUTH_ENABLED=${OAUTH_ENABLED:-false}
-    #   - OAUTH_TOKEN=${OAUTH_TOKEN}
+    #   - REDDIT_USER_AGENT=${REDDIT_USER_AGENT}
+    #   - MCP_PUBLIC_BASE_URL=${MCP_PUBLIC_BASE_URL}
+    #   - REDDIT_MCP_JWT_SIGNING_KEY=${REDDIT_MCP_JWT_SIGNING_KEY}
+    #   - REDDIT_MCP_ENCRYPTION_KEY=${REDDIT_MCP_ENCRYPTION_KEY}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
@@ -25,3 +26,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  reddit-mcp-oauth-data:
+

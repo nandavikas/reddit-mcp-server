@@ -4,7 +4,7 @@
  * result to `Either<RedditError, T>` via the total `classifyRedditError`. Because the body
  * of `Try.async(() => Promise<T>)` can only signal failure by throwing, the `throw`s here
  * (HTTP/validation/domain errors, and the validateWriteAccess/checkDuplicateContent helpers
- * they call) are local control-flow captured by that `Try` — they never escape the method
+ * they call) are local control-flow captured by that `Try` â€” they never escape the method
  * boundary. prefer-either's "return Either.left" suggestion does not apply inside a Try body.
  */
 import crypto from "crypto"
@@ -100,6 +100,7 @@ export class RedditClient {
   private readonly userAgent: string
   private readonly username?: string
   private readonly password?: string
+  private readonly suppliedAccessToken?: string
   private readonly baseUrl: string
   private readonly authMode: RedditAuthMode
   private readonly hasCredentials: boolean
@@ -108,7 +109,7 @@ export class RedditClient {
   private readonly cache?: ResponseCache
   private readonly retry: RetryConfig
 
-  // Mutable state — inherent to a stateful HTTP client with token refresh
+  // Mutable state â€” inherent to a stateful HTTP client with token refresh
 
   private accessToken?: string
 
@@ -126,6 +127,7 @@ export class RedditClient {
     this.userAgent = config.userAgent
     this.username = config.username
     this.password = config.password
+    this.suppliedAccessToken = config.accessToken
     this.authMode = config.authMode ?? "auto"
     this.hasCredentials = Boolean(this.clientId && this.clientSecret)
     this.baseUrl = this.determineBaseUrl()
@@ -146,6 +148,9 @@ export class RedditClient {
   }
 
   private determineBaseUrl(): string {
+    if (this.suppliedAccessToken !== undefined) {
+      return "https://oauth.reddit.com"
+    }
     switch (this.authMode) {
       case "authenticated":
         return "https://oauth.reddit.com"
@@ -171,7 +176,8 @@ export class RedditClient {
         }
       }
 
-      const requiresAuth = this.authMode === "authenticated" || (this.authMode === "auto" && this.hasCredentials)
+      const requiresAuth =
+        this.suppliedAccessToken !== undefined || this.authMode === "authenticated" || (this.authMode === "auto" && this.hasCredentials)
 
       if (requiresAuth && (Date.now() >= this.tokenExpiry || !this.authenticated)) {
         const authResult = await this.authenticate()
@@ -192,13 +198,13 @@ export class RedditClient {
 
       // 401 once-off re-auth, then retry the request (which itself honors 429 backoff).
       const response =
-        first.status === 401 && this.authenticated
+        first.status === 401 && this.authenticated && this.suppliedAccessToken === undefined
           ? await this.fetchWithRetry(url, options, { ...headers, Authorization: await this.reauthorize() }, path, 0)
           : first
 
       // Reddit network-blocks the unauthenticated JSON API from many IP ranges and answers with
       // an HTML block page. A private/quarantined subreddit also 403s, but does so with a JSON
-      // body — so the content type is what separates "this network is blocked" from "this
+      // body â€” so the content type is what separates "this network is blocked" from "this
       // resource is closed", and only the former is worth redirecting the user to OAuth.
       if (!requiresAuth && response.status === 403 && !headerValue(response, "content-type").includes("json")) {
         throw new NetworkBlockedError(
@@ -223,6 +229,12 @@ export class RedditClient {
   }
 
   async authenticate(): Promise<Either<Error, void>> {
+    if (this.suppliedAccessToken !== undefined) {
+      this.accessToken = this.suppliedAccessToken
+      this.authenticated = true
+      this.tokenExpiry = Number.MAX_SAFE_INTEGER
+      return Right(undefined as void)
+    }
     if (this.authMode === "anonymous") {
       this.authenticated = false
       return Right(undefined as void)
@@ -291,6 +303,9 @@ export class RedditClient {
   }
 
   private validateWriteAccess(): void {
+    if (this.suppliedAccessToken !== undefined) {
+      return
+    }
     if (this.username === undefined || this.password === undefined) {
       if (this.authMode === "anonymous") {
         throw new NotAuthenticatedError(
@@ -382,7 +397,7 @@ export class RedditClient {
       return response
     }
 
-    console.error(`[RateLimit] 429 from ${path} — retry ${attempt + 1}/${this.retry.maxRetries} in ${wait}ms`)
+    console.error(`[RateLimit] 429 from ${path} â€” retry ${attempt + 1}/${this.retry.maxRetries} in ${wait}ms`)
     await new Promise((resolve) => setTimeout(resolve, wait))
     return this.fetchWithRetry(url, options, headers, path, attempt + 1)
   }
@@ -491,16 +506,15 @@ export class RedditClient {
   async getMyOverview(
     options: { readonly limit?: number; readonly after?: string } = {},
   ): Promise<Either<RedditError, UserContent>> {
-    if (this.username === undefined) {
-      return Left(new NotAuthenticatedError("Fetching your overview requires REDDIT_USERNAME"))
-    }
+    const username = this.username ?? (await this.getMe()).fold(() => undefined, (user) => user.name)
+    if (username === undefined) return Left(new NotAuthenticatedError("Fetching your overview requires Reddit OAuth"))
     const { limit = 25, after } = options
     const params = new URLSearchParams({ limit: limit.toString() })
     if (after !== undefined) {
       params.set("after", after)
     }
     return this.getUserContent(
-      `/user/${encodeURIComponent(this.username)}/overview.json?${params}`,
+      `/user/${encodeURIComponent(username)}/overview.json?${params}`,
       "Failed to get your overview",
     )
   }
@@ -508,24 +522,23 @@ export class RedditClient {
   async getMySaved(
     options: { readonly limit?: number; readonly after?: string } = {},
   ): Promise<Either<RedditError, UserContent>> {
-    if (this.username === undefined) {
-      return Left(new NotAuthenticatedError("Fetching saved content requires REDDIT_USERNAME"))
-    }
+    const username = this.username ?? (await this.getMe()).fold(() => undefined, (user) => user.name)
+    if (username === undefined) return Left(new NotAuthenticatedError("Fetching saved content requires Reddit OAuth"))
     const { limit = 25, after } = options
     const params = new URLSearchParams({ limit: limit.toString() })
     if (after !== undefined) {
       params.set("after", after)
     }
     return this.getUserContent(
-      `/user/${encodeURIComponent(this.username)}/saved.json?${params}`,
+      `/user/${encodeURIComponent(username)}/saved.json?${params}`,
       "Failed to get saved content",
     )
   }
 
-  // The authenticated user's own account (requires user credentials — /api/v1/me needs identity).
+  // The authenticated user's own account (requires user credentials â€” /api/v1/me needs identity).
   async getMe(): Promise<Either<RedditError, RedditUser>> {
-    if (this.username === undefined) {
-      return Left(new NotAuthenticatedError("Fetching your account requires REDDIT_USERNAME"))
+    if (this.username === undefined && this.suppliedAccessToken === undefined) {
+      return Left(new NotAuthenticatedError("Fetching your account requires Reddit OAuth"))
     }
     const context = "Failed to get authenticated user info"
     const attempt = await Try.async(async (): Promise<RedditUser> => {
@@ -1246,6 +1259,12 @@ export function initializeRedditClient(config: RedditClientConfig): RedditClient
   return client
 }
 
+/** Create an isolated client for one authenticated Reddit OAuth session. */
+export function createRedditClient(config: RedditClientConfig): RedditClient {
+  return new RedditClient(config)
+}
+
 export function getRedditClient(): Option<RedditClient> {
   return clientHolder.instance
 }
+

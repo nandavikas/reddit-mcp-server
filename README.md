@@ -62,6 +62,72 @@ Or add to your MCP config (Claude Desktop, Cursor, etc.):
 claude mcp add --transport stdio reddit -- npx reddit-mcp-server
 ```
 
+## Secure remote mode for ChatGPT
+
+This fork can run as a private remote MCP for ChatGPT without storing a Reddit
+username or password. Each ChatGPT user completes the normal Reddit OAuth
+consent screen; the server keeps the revocable Reddit token encrypted and uses
+it only for that user's MCP requests.
+
+### 1. Create a Reddit web app
+
+At [Reddit app preferences](https://www.reddit.com/prefs/apps), create a
+**web app** (not a script app) and register this redirect URI exactly:
+
+```
+https://YOUR-MCP-DOMAIN/oauth/callback
+```
+
+Keep the Reddit client secret in your host's secret manager. Do not commit it
+or add it to this repository.
+
+### 2. Configure the remote server
+
+Use HTTPS and set these environment variables:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `TRANSPORT_TYPE=httpStream` | Yes | Enables the remote MCP endpoint |
+| `MCP_PUBLIC_BASE_URL` | Yes | Public origin, e.g. `https://reddit-mcp.example.com` |
+| `REDDIT_CLIENT_ID` | Yes | Reddit web-app client ID |
+| `REDDIT_CLIENT_SECRET` | Yes | Reddit web-app secret |
+| `REDDIT_USER_AGENT` | Yes | A descriptive Reddit-compliant user agent |
+| `REDDIT_MCP_JWT_SIGNING_KEY` | Yes | A high-entropy secret for MCP tokens |
+| `REDDIT_MCP_ENCRYPTION_KEY` | Yes | A separate high-entropy secret for stored Reddit tokens |
+| `REDDIT_MCP_OAUTH_STORAGE_PATH` | Yes | Persistent writable directory; Docker defaults to `/data/reddit-mcp-oauth` |
+| `REDDIT_SAFE_MODE=standard` | Recommended | Adds rate limiting and duplicate protection |
+| `REDDIT_BOT_DISCLOSURE=auto` | Recommended | Labels automated content |
+
+Generate the two server secrets with a password manager or:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+The OAuth storage directory must survive redeployments. The supplied Docker
+Compose configuration creates a named volume for it.
+
+### 3. Connect it in ChatGPT
+
+In ChatGPT developer mode, create a custom app with this server URL:
+
+```
+https://YOUR-MCP-DOMAIN/mcp
+```
+
+Choose OAuth authentication. ChatGPT discovers the MCP OAuth metadata, then
+opens Reddit's normal permission screen on the first connection. The available
+tools support searching and reading Reddit, viewing the connected account's
+profile/activity/saved items, and explicitly requested posting, replying,
+editing, and deletion. The server deliberately has no voting, direct-message,
+or mass-posting tools.
+
+### Local legacy mode
+
+The original stdio/password configuration is retained only for existing local
+installations. Do not use `REDDIT_USERNAME` or `REDDIT_PASSWORD` for the
+remote ChatGPT deployment described above.
+
 ## Features
 
 ### Read-only Tools
@@ -79,7 +145,7 @@ claude mcp add --transport stdio reddit -- npx reddit-mcp-server
 | `get_post_comments`       | Get comments from a specific post with threading                            |
 | `search_reddit`           | Search for posts across Reddit                                              |
 
-### Write Tools (Require User Credentials)
+### Write Tools (Require a connected Reddit OAuth account in remote mode)
 
 | Tool             | Description                                 |
 | ---------------- | ------------------------------------------- |
@@ -183,14 +249,14 @@ When enabled, a footer is appended to all posts, replies, and edits:
 
 ```
 ---
-🤖 I am a bot | Built with reddit-mcp-server
+ðŸ¤– I am a bot | Built with reddit-mcp-server
 ```
 
 Customize the footer with `REDDIT_BOT_FOOTER`:
 
 ```bash
 export REDDIT_BOT_DISCLOSURE=auto
-export REDDIT_BOT_FOOTER=$'\n\n---\n^(🤖 Custom bot footer text)'
+export REDDIT_BOT_FOOTER=$'\n\n---\n^(ðŸ¤– Custom bot footer text)'
 ```
 
 ## Authentication Modes
@@ -213,7 +279,7 @@ export REDDIT_BOT_FOOTER=$'\n\n---\n^(🤖 Custom bot footer text)'
 }
 ```
 
-**Anonymous mode does not work on every network.** Reddit blocks unauthenticated requests from many IP ranges — datacenters, cloud hosts, VPNs, and addresses it has flagged — and answers with an HTTP 403 block page. If you hit this, tools fail with:
+**Anonymous mode does not work on every network.** Reddit blocks unauthenticated requests from many IP ranges â€” datacenters, cloud hosts, VPNs, and addresses it has flagged â€” and answers with an HTTP 403 block page. If you hit this, tools fail with:
 
 ```
 Reddit is blocking unauthenticated requests from this network (HTTP 403 with a
@@ -221,7 +287,7 @@ block page). Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to authenticate with
 OAuth, which also raises the rate limit from ~10 to 60+ requests/min.
 ```
 
-The fix is OAuth credentials — see the next section. This is a property of your network, not of your Reddit account or the subreddit you asked for, so it affects every tool at once. A 403 on a single subreddit while others work is a different thing: that subreddit is private or quarantined.
+The fix is OAuth credentials â€” see the next section. This is a property of your network, not of your Reddit account or the subreddit you asked for, so it affects every tool at once. A 403 on a single subreddit while others work is a different thing: that subreddit is private or quarantined.
 
 ### Authenticated Mode (Higher Rate Limits)
 
@@ -346,14 +412,15 @@ docker run -d --name reddit-mcp -p 3000:3000 --env-file .env reddit-mcp-server
 
 This server is designed with [Reddit's Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy) in mind:
 
-- **Safe mode on by default** — rate limiting and duplicate detection prevent spam
-- **Cross-subreddit duplicate detection** — blocks identical content across subreddits
-- **Bot disclosure support** — optional automated footer for transparency
-- **No voting/karma manipulation** — upvote/downvote tools are intentionally excluded
-- **No private messaging** — DM tools are intentionally excluded
-- **Policy-aware AI instructions** — MCP server instructions remind AI assistants of data usage restrictions
+- **Safe mode on by default** â€” rate limiting and duplicate detection prevent spam
+- **Cross-subreddit duplicate detection** â€” blocks identical content across subreddits
+- **Bot disclosure support** â€” optional automated footer for transparency
+- **No voting/karma manipulation** â€” upvote/downvote tools are intentionally excluded
+- **No private messaging** â€” DM tools are intentionally excluded
+- **Policy-aware AI instructions** â€” MCP server instructions remind AI assistants of data usage restrictions
 
 ## Credits
 
 - Fork of [reddit-mcp-server](https://github.com/alexandros-lekkas/reddit-mcp-server) by Alexandros Lekkas
 - Inspired by [Python Reddit MCP Server](https://github.com/Arindam200/reddit-mcp) by Arindam200
+

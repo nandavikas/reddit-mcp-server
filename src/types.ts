@@ -41,6 +41,11 @@ export type RedditClientConfig = {
   readonly clientId: string
   readonly clientSecret: string
   readonly userAgent: string
+  /**
+   * A Reddit OAuth access token obtained through the browser authorization
+   * flow. When present, this takes precedence over the legacy password grant.
+   */
+  readonly accessToken?: string
   readonly username?: string
   readonly password?: string
   readonly authMode?: RedditAuthMode
@@ -471,3 +476,4 @@ export type RedditApiInfoResponse = {
     readonly [key: string]: unknown
   }
 }
+
